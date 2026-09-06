@@ -1,10 +1,96 @@
 # Development standards
 
+## New developer setup
+
+Start from the shared GitHub source repository. GitHub stores the application source, committed Prisma schema, migrations, and seed code; it does **not** store any developer's PostgreSQL database or local credentials.
+
+```text
+GitHub repository
+  -> Prisma schema + committed migrations + seed
+  -> developer's local PostgreSQL database
+  -> BOSS API
+```
+
+1. Clone the repository and enter it:
+
+   ```bash
+   git clone https://github.com/SUCHANKSH/boss_web.git
+   cd boss_web
+   ```
+
+2. Verify that Node.js, npm, Git, and PostgreSQL are installed and available. For example, run `node --version`, `npm --version`, `git --version`, and `psql --version`.
+
+3. Install workspace dependencies:
+
+   ```bash
+   npm install
+   ```
+
+4. Create a PostgreSQL development database named `boss_website` with your normal local PostgreSQL account. For example:
+
+   ```sql
+   CREATE DATABASE boss_website;
+   ```
+
+5. Copy `.env.example` to `.env` (for example, `Copy-Item .env.example .env` in PowerShell), then set `DATABASE_URL` to your local database, such as `postgresql://<user>:<password>@localhost:5432/boss_website?schema=public`. Set `AUTH_SECRET` to a long random local value; `.env.example` suggests `openssl rand -base64 32`.
+
+   Never commit `.env`, credentials, API keys, or secrets. Each developer normally uses their own local PostgreSQL database; do not use another developer's personal local database as the team workflow.
+
+6. Generate Prisma Client, apply development migrations, seed the database, and confirm migration status:
+
+   ```bash
+   npm run db:generate
+   npm run db:migrate
+   npm run db:seed
+   npm run db:status
+   ```
+
+   Do not create tables manually. The Prisma schema and committed migrations define the database structure.
+
+7. In one terminal, start the API:
+
+   ```bash
+   npm run dev:api
+   ```
+
+   In another terminal, start the Vite storefront:
+
+   ```bash
+   npm run dev:web
+   ```
+
+8. Verify `http://localhost:4000/health` and `http://localhost:4000/ready`; both should return HTTP 200. Then open the storefront at `http://localhost:5173` and confirm that its public catalog, including `/products`, loads through the API proxy.
+
+### First-run verification
+
+```text
+[ ] Repository cloned
+[ ] npm install completed
+[ ] Local PostgreSQL running
+[ ] boss_website database created
+[ ] .env configured
+[ ] AUTH_SECRET configured
+[ ] Prisma Client generated
+[ ] Development migrations applied
+[ ] Seed completed
+[ ] API starts
+[ ] /health returns 200
+[ ] /ready returns 200
+[ ] Storefront starts
+[ ] Public catalog loads
+```
+
+### Development, test, and shared environments
+
+`boss_website` is the local development database. `boss_website_test` is the isolated test database: tests must never use development data. The API test setup takes `TEST_DATABASE_URL` or `DATABASE_URL` only as local connection credentials, then forcibly changes the database name to `boss_website_test`. Ensure that test database exists and has the committed migrations applied before running API tests; test data must not affect `boss_website`.
+
+GitHub is the shared source-code repository, not a shared database. Shared staging or production databases are separate environments with their own credentials and deployment process. Local credentials must not be committed.
+
 ## Commands
 
-Copy `.env.example` to `.env`, configure the local `boss_website` PostgreSQL database, and set a long random `AUTH_SECRET`; never commit `.env`. Use `npm install`, `npm run db:generate`, `npm run db:migrate`, `npm run db:seed`, `npm run dev:api`, `npm run lint`, `npm run format:check`, and `npm run test`. Tests use isolated `boss_website_test`, never development data.
+Use `npm run lint`, `npm run format:check`, and `npm run test` for local checks. Tests use isolated `boss_website_test`, never development data.
 
-`npm run build` builds database, contracts, API, then the storefront. Start compiled API output with `npm run start:api`. Use `npm run db:status` to inspect migrations and `npm run db:migrate:deploy` to apply committed migrations. GitHub Actions runs formatting, type checking, Prisma validation/generation/migrations against isolated PostgreSQL 18, tests, and the root build.
+`npm run db:generate` generates Prisma Client. Use `npm run db:migrate` for local development migrations, `npm run db:seed` to load the repository seed data, and `npm run db:status` to inspect migration status. Use `npm run db:migrate:deploy` when applying already committed migrations in a deployment-oriented environment; it does not create new migrations. `npm run build` builds database, contracts, API, then the storefront. Start compiled API output with `npm run start:api`. GitHub Actions runs formatting, type checking, Prisma validation/generation/migrations against isolated PostgreSQL 18, tests, and the root build.
 
 ## Storefront (Phase 3)
 
@@ -22,7 +108,21 @@ Set optional `VITE_SITE_ORIGIN` to the deployed public storefront origin for can
 
 ## Commerce cart foundation (Phase 5 in progress)
 
-The committed migration `20260906133000_phase_5_commerce_cart` adds persistent customer carts and cart items. Apply it with `npm run db:migrate:deploy`; tests always apply it to `boss_website_test`, never the development database. The implemented protected endpoints are `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/:id`, `DELETE /api/cart/items/:id`, and `DELETE /api/cart`. They accept variant IDs and quantities only: prices, subtotals, and availability are calculated by the API. Checkout, orders, payment initiation, and a customer commerce UI are not yet implemented.
+### Phase 5.1
+
+The committed migration `20260906133000_phase_5_commerce_cart` adds the persistent authenticated-customer cart foundation. The protected endpoints are `GET /api/cart`, `POST /api/cart/items`, `PATCH /api/cart/items/:id`, `DELETE /api/cart/items/:id`, and `DELETE /api/cart`. They accept variant IDs and quantities only: prices, subtotals, and availability are calculated by the API.
+
+### Phase 5.2
+
+Checkout and customer order retrieval are implemented through protected endpoints: `POST /api/checkout`, `GET /api/orders`, and `GET /api/orders/:id`. Checkout accepts a shipping-address snapshot and idempotency key only. Customer authentication is required; prices and inventory are server-authoritative. It runs in a serializable PostgreSQL transaction, conditionally decrements tracked stock, creates immutable order and item snapshots, converts the cart, and creates a `PENDING_PAYMENT` order with a `PENDING` payment foundation. Transactional failure rolls back the cart, order, inventory, and idempotency changes. Retrying the same key and request safely returns the existing checkout; conflicting reuse is rejected. Payment providers, webhooks, payment collection, and a customer commerce UI are not implemented.
+
+### Phase 5.3 inventory transaction hardening
+
+The Phase 5.3 migration adds `ORDER_CHECKOUT` as an inventory-adjustment reason. For tracked items, checkout decrements inventory inside the same serializable PostgreSQL transaction as order creation, cart conversion, and idempotency recording. The conditional decrement prevents overselling and protects concurrent checkouts. A rollback keeps inventory, order, cart, idempotency, and inventory-history changes atomic.
+
+Committed tracked checkout mutations create `InventoryAdjustment` history records with the `ORDER_CHECKOUT` reason and the order as their reference. An idempotent retry reuses the completed checkout rather than creating another inventory mutation or history row; failed transactions leave no committed checkout-history row. Relevant integrity mechanisms include the unique inventory-to-variant relationship, the inventory-history index on `[inventoryId, createdAt]`, the checkout operation's unique `[userId, idempotencyKey]` constraint, and its unique order reference.
+
+Phase 5.3 is not declared complete in the current phase plan; compiled-runtime and direct-PostgreSQL verification remain pending documentation/verification work.
 
 ## Phase 2.3 service tests
 
