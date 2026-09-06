@@ -1,0 +1,32 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          { POSTGRES_USER: postgres, POSTGRES_PASSWORD: postgres, POSTGRES_DB: boss_website_test }
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/boss_website_test?schema=public
+      AUTH_SECRET: ci-only-secret-that-is-at-least-thirty-two-characters
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22, cache: npm }
+      - run: npm ci
+      - run: |
+          cp .env.example .env
+          echo "DATABASE_URL=$DATABASE_URL" >> .env
+          echo "AUTH_SECRET=$AUTH_SECRET" >> .env
+      - run: npm run format:check
+      - run: npm run typecheck
+      - run: npm run db:validate
+      - run: npm run db:generate
+      - run: npm run db:migrate:deploy
+      - run: npm test
+      - run: npm run build

@@ -1,0 +1,1 @@
+ALTER TYPE "InventoryAdjustmentReason" ADD VALUE IF NOT EXISTS 'ORDER_CHECKOUT';
