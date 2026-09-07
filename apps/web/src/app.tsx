@@ -23,6 +23,10 @@ import {
 import { usePageMetadata } from './seo.js';
 
 type DataState<T> = { data?: T; error: boolean; retry: () => void };
+type BrowsePage = {
+  data: Array<{ id: string; name: string; slug: string; description: string | null }>;
+  meta: { page: number; limit: number; total: number; totalPages: number };
+};
 function useData<T>(key: string, load: () => Promise<T>): DataState<T> {
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<{ data?: T; error: boolean }>({ error: false });
@@ -322,7 +326,7 @@ function Browse({ kind }: { kind: 'categories' | 'collections' }) {
     description: `Explore BOSS ${kind} and the editions within them.`,
     path: `/${kind}`,
   });
-  const data = useData(kind, () =>
+  const data = useData<BrowsePage>(kind, () =>
     kind === 'categories' ? catalogApi.categories() : catalogApi.collections(),
   );
   return (

@@ -14,7 +14,11 @@ const baseUrl = import.meta.env.VITE_API_BASE_URL ?? '';
 const pageSchema = z.object({ data: z.array(z.unknown()), meta: paginationMetaSchema });
 type Query = Record<string, string | number | undefined>;
 export class CatalogApiError extends Error {}
-const request = async <T>(path: string, schema: z.ZodType<T>, query?: Query): Promise<T> => {
+const request = async <T extends z.ZodTypeAny>(
+  path: string,
+  schema: T,
+  query?: Query,
+): Promise<z.infer<T>> => {
   const params = new URLSearchParams();
   Object.entries(query ?? {}).forEach(
     ([key, value]) => value !== undefined && params.set(key, String(value)),
@@ -22,9 +26,13 @@ const request = async <T>(path: string, schema: z.ZodType<T>, query?: Query): Pr
   const response = await fetch(`${baseUrl}${path}${params.size ? `?${params}` : ''}`);
   const body: unknown = await response.json().catch(() => undefined);
   if (!response.ok) throw new CatalogApiError('Unable to load the catalog right now.');
-  return apiSuccessSchema(schema).parse(body).data;
+  apiSuccessSchema(schema).parse(body);
+  if (!body || typeof body !== 'object' || !('data' in body)) {
+    throw new CatalogApiError('Unable to load the catalog right now.');
+  }
+  return schema.parse(body.data);
 };
-const paginated = <T>(item: z.ZodType<T>) =>
+const paginated = <T extends z.ZodTypeAny>(item: T) =>
   pageSchema.transform((value) => ({
     ...value,
     data: z.array(item).parse(value.data),

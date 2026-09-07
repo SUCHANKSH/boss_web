@@ -47,3 +47,7 @@ The existing storefront has refined visual hierarchy, reusable product presentat
 ## Phase 5.2 delivered scope
 
 Backend-only checkout conversion is implemented for authenticated customer carts. It creates immutable order/item/address snapshots and a pending payment foundation, converts the cart, and conditionally decrements tracked inventory inside a serializable PostgreSQL transaction. Customer-scoped idempotency replays the same checkout safely and rejects conflicting reuse. Payment integration, frontend commerce, shipping, tax, discounts, and fulfillment remain deferred.
+
+## Phase 5.3 delivered scope
+
+Checkout inventory hardening records a single `ORDER_CHECKOUT` inventory-history entry for each committed tracked checkout, linked to its order. The history mutation, conditional stock decrement, order creation, cart conversion, and idempotency record remain atomic in the existing serializable transaction. Payment-provider, fulfillment, shipping, discount, tax, refund, and commerce-UI work remain out of scope.

@@ -331,4 +331,76 @@ describe('Checkout API', () => {
       await prisma.order.count({ where: { userId: { in: users.map((user) => user.id) } } }),
     ).toBe(1);
   });
+  it('prevents concurrent larger-quantity checkouts from overselling tracked stock', async () => {
+    const product = await prisma.product.create({
+      data: {
+        name: `Concurrent quantity ${suffix}`,
+        slug: `concurrent-quantity-${suffix}`,
+        productType: 'PRINT',
+        status: 'ACTIVE',
+      },
+    });
+    const variant = await prisma.productVariant.create({
+      data: {
+        productId: product.id,
+        sku: `CONCURRENT-QUANTITY-${suffix}`,
+        name: 'A3',
+        attributes: {},
+        pricePaise: 1000,
+        inventory: { create: { available: 3 } },
+      },
+    });
+    const users = await Promise.all(
+      ['a', 'b'].map((value) =>
+        prisma.user.create({
+          data: { email: `concurrent-quantity-${value}-${suffix}@example.test`, role: 'CUSTOMER' },
+        }),
+      ),
+    );
+    const carts = await Promise.all(
+      users.map((user) =>
+        prisma.cart.create({
+          data: {
+            userId: user.id,
+            items: { create: { variantId: variant.id, quantity: 2, unitPricePaise: 1000 } },
+          },
+        }),
+      ),
+    );
+    const results = await Promise.allSettled(
+      users.map((user, index) =>
+        new CheckoutService(prisma).checkout(
+          user.id,
+          address,
+          `concurrent-quantity-key-${index}-${suffix}`,
+        ),
+      ),
+    );
+    const fulfilled = results.filter(
+      (result): result is PromiseFulfilledResult<{ id: string }> => result.status === 'fulfilled',
+    );
+    expect(fulfilled).toHaveLength(1);
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(
+      (await prisma.inventory.findUniqueOrThrow({ where: { variantId: variant.id } })).available,
+    ).toBe(1);
+    expect(
+      await prisma.inventoryAdjustment.count({
+        where: { inventory: { variantId: variant.id }, reason: 'ORDER_CHECKOUT' },
+      }),
+    ).toBe(1);
+    expect(
+      await prisma.order.count({ where: { userId: { in: users.map((user) => user.id) } } }),
+    ).toBe(1);
+    const cartStates = await prisma.cart.findMany({
+      where: { id: { in: carts.map((cart) => cart.id) } },
+      select: { status: true },
+    });
+    expect(cartStates.map((cart) => cart.status).sort()).toEqual(['ACTIVE', 'CONVERTED']);
+    expect(
+      await prisma.checkoutOperation.count({
+        where: { userId: { in: users.map((user) => user.id) } },
+      }),
+    ).toBe(1);
+  });
 });

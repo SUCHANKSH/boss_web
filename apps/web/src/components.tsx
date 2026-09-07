@@ -35,7 +35,7 @@ function ImageSurface({
   alt,
   eager = false,
 }: {
-  src?: string | null;
+  src?: string | null | undefined;
   alt: string;
   eager?: boolean;
 }) {
@@ -123,7 +123,7 @@ export function ProductGallery({ product }: { product: ProductDetail }) {
   const [selected, setSelected] = useState(0);
   const media = product.media;
   const selectedMedia = media[selected];
-  if (!media.length)
+  if (!selectedMedia)
     return <div className="art gallery__empty">Product imagery is coming soon.</div>;
   return (
     <div className="gallery" aria-label={`${product.name} media gallery`}>

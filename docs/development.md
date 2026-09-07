@@ -122,7 +122,7 @@ The Phase 5.3 migration adds `ORDER_CHECKOUT` as an inventory-adjustment reason.
 
 Committed tracked checkout mutations create `InventoryAdjustment` history records with the `ORDER_CHECKOUT` reason and the order as their reference. An idempotent retry reuses the completed checkout rather than creating another inventory mutation or history row; failed transactions leave no committed checkout-history row. Relevant integrity mechanisms include the unique inventory-to-variant relationship, the inventory-history index on `[inventoryId, createdAt]`, the checkout operation's unique `[userId, idempotencyKey]` constraint, and its unique order reference.
 
-Phase 5.3 is not declared complete in the current phase plan; compiled-runtime and direct-PostgreSQL verification remain pending documentation/verification work.
+Phase 5.3 verification uses the compiled API and PostgreSQL: an exact-stock checkout must produce one `ORDER_CHECKOUT` record, an idempotent retry must not add another decrement or history row, and an insufficient-stock checkout must leave the cart active without an order or checkout-history mutation. Disposable verification data must be cleaned up afterward.
 
 ## Phase 2.3 service tests
 
